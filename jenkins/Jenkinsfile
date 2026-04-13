@@ -1,0 +1,140 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "${DOCKERHUB_USER}/foodexpress-api"
+        IMAGE_TAG    = "${GIT_COMMIT.take(7)}"
+        AWS_REGION   = 'ap-southeast-1'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'git log -1 --oneline'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh '''
+                    node --version
+                    npm ci
+                    npm test
+                '''
+            }
+            post {
+                always {
+                    publishTestResults(testResultsFiles: '**/test-results.xml')
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
+                    docker.build("${DOCKER_IMAGE}:latest")
+                }
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            when { branch 'main' }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-credentials',
+                    usernameVariable: 'DOCKERHUB_USER',
+                    passwordVariable: 'DOCKERHUB_PASS'
+                )]) {
+                    sh '''
+                        echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+                        docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
+                        docker push ${DOCKER_IMAGE}:latest
+                        docker logout
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Provision') {
+            when { branch 'main' }
+            steps {
+                dir('terraform') {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-key', variable: 'AWS_SECRET_ACCESS_KEY'),
+                        string(credentialsId: 'ssh-public-key',  variable: 'SSH_PUBLIC_KEY')
+                    ]) {
+                        sh '''
+                            terraform init
+                            terraform apply -auto-approve \
+                              -var="ssh_public_key=${SSH_PUBLIC_KEY}" \
+                              -var="aws_region=${AWS_REGION}"
+                            terraform output -raw public_ip > /tmp/ec2_ip.txt
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to EC2') {
+            when { branch 'main' }
+            steps {
+                script {
+                    def ec2Ip = readFile('/tmp/ec2_ip.txt').trim()
+                    sshagent(credentials: ['ec2-ssh-key']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ec2-user@${ec2Ip} '
+                              docker pull ${DOCKER_IMAGE}:${IMAGE_TAG}
+                              docker stop foodexpress-api 2>/dev/null || true
+                              docker rm   foodexpress-api 2>/dev/null || true
+                              docker run -d \\
+                                --name foodexpress-api \\
+                                --restart unless-stopped \\
+                                -p 3000:3000 \\
+                                -e NODE_ENV=production \\
+                                ${DOCKER_IMAGE}:${IMAGE_TAG}
+                              docker system prune -f
+                            '
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                script {
+                    def ec2Ip = readFile('/tmp/ec2_ip.txt').trim()
+                    sh """
+                        sleep 15
+                        curl --fail --retry 5 --retry-delay 10 \\
+                          http://${ec2Ip}:3000/health
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment successful!'
+            slackSend(color: 'good', message: "FoodExpress deployed: ${GIT_COMMIT.take(7)}")
+        }
+        failure {
+            echo 'Pipeline failed!'
+            slackSend(color: 'danger', message: "FoodExpress deploy FAILED: ${env.JOB_NAME}")
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
