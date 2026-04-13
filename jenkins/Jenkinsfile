@@ -4,7 +4,7 @@ pipeline {
     environment {
         DOCKER_IMAGE = "${DOCKERHUB_USER}/foodexpress-api"
         IMAGE_TAG    = "${GIT_COMMIT.take(7)}"
-        AWS_REGION   = 'ap-southeast-1'
+        AWS_REGION   = 'us-east-1'
     }
 
     options {

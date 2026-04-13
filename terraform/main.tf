@@ -9,7 +9,7 @@ terraform {
   # backend "s3" {
   #   bucket = "foodexpress-tfstate"
   #   key    = "prod/terraform.tfstate"
-  #   region = "ap-southeast-1"
+  #   region = "us-east-1"
   # }
 }
 
