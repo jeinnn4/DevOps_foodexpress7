@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "${DOCKERHUB_USER}/foodexpress-api"
+        DOCKER_IMAGE = "foodexpress-api"
         IMAGE_TAG    = "${GIT_COMMIT.take(7)}"
         AWS_REGION   = 'us-east-1'
     }
@@ -23,11 +23,14 @@ pipeline {
         }
 
         stage('Test') {
+            agent {
+                docker {
+                    image 'node:18'
+                }
+            }
             steps {
-                sh '''
-                    npm ci
-                    npm test
-                '''
+                sh 'npm ci'
+                sh 'npm test'
             }
         }
 
@@ -50,6 +53,8 @@ pipeline {
                 )]) {
                     sh '''
                         echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+                        docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} $DOCKERHUB_USER/foodexpress-api:${IMAGE_TAG}
+                        docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} $DOCKERHUB_USER/foodexpress-api:latest
                         docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
                         docker push ${DOCKER_IMAGE}:latest
                         docker logout
