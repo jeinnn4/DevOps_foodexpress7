@@ -25,15 +25,9 @@ pipeline {
         stage('Test') {
             steps {
                 sh '''
-                    node --version
                     npm ci
                     npm test
                 '''
-            }
-            post {
-                always {
-                    publishTestResults(testResultsFiles: '**/test-results.xml')
-                }
             }
         }
 
@@ -76,8 +70,7 @@ pipeline {
                         sh '''
                             terraform init
                             terraform apply -auto-approve \
-                              -var="ssh_public_key=${SSH_PUBLIC_KEY}" \
-                              -var="aws_region=${AWS_REGION}"
+                              -var="ssh_public_key=${SSH_PUBLIC_KEY}"
                             terraform output -raw public_ip > /tmp/ec2_ip.txt
                         '''
                     }
@@ -92,7 +85,7 @@ pipeline {
                     def ec2Ip = readFile('/tmp/ec2_ip.txt').trim()
                     sshagent(credentials: ['ec2-ssh-key']) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ec2-user@${ec2Ip} '
+                            ssh -o StrictHostKeyChecking=no ubuntu@${ec2Ip} '
                               docker pull ${DOCKER_IMAGE}:${IMAGE_TAG}
                               docker stop foodexpress-api 2>/dev/null || true
                               docker rm   foodexpress-api 2>/dev/null || true
@@ -125,16 +118,8 @@ pipeline {
     }
 
     post {
-        success {
-            echo 'Deployment successful!'
-            slackSend(color: 'good', message: "FoodExpress deployed: ${GIT_COMMIT.take(7)}")
-        }
-        failure {
-            echo 'Pipeline failed!'
-            slackSend(color: 'danger', message: "FoodExpress deploy FAILED: ${env.JOB_NAME}")
-        }
-        always {
-            cleanWs()
-        }
+        success { echo 'Deployment successful!' }
+        failure { echo 'Pipeline failed!' }
+        always  { cleanWs() }
     }
 }

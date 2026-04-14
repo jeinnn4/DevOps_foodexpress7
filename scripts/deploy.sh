@@ -25,21 +25,17 @@ docker run -d \
     --restart unless-stopped \
     -p "$PORT:$PORT" \
     -e NODE_ENV=production \
-    -e PORT="$PORT" \
     --memory="512m" \
     --cpus="1.0" \
-    --log-driver json-file \
-    --log-opt max-size="10m" \
-    --log-opt max-file="3" \
     "$IMAGE"
 
-# Wait and verify
+# Verify deployment
 sleep 10
 if curl -sf http://localhost:"$PORT"/health > /dev/null; then
-    echo " Deployment successful!"
-    docker system prune -f --volumes 2>/dev/null || true
+    echo 'Deployment successful!'
+    docker system prune -f
 else
-    echo " Health check failed! Rolling back..."
+    echo 'Health check failed!'
     docker stop "$CONTAINER" || true
     exit 1
 fi
