@@ -34,7 +34,7 @@ pipeline {
             steps {
                 sh '''
                     npm config set cache /tmp/.npm
-                    npm ci
+                    npm install
                     npm test
                 '''
             }
