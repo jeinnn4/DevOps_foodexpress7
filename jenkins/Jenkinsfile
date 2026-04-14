@@ -28,12 +28,18 @@ pipeline {
                     image 'node:18'
                 }
             }
+            environment {
+                HOME = '/tmp'
+            }
             steps {
-                sh 'npm ci'
-                sh 'npm test'
+                sh '''
+                    npm config set cache /tmp/.npm
+                    npm ci
+                    npm test
+                '''
             }
         }
-
+        
         stage('Build Docker Image') {
             steps {
                 script {
