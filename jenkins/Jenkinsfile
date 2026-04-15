@@ -2,14 +2,14 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "foodexpress-api"
+        DOCKER_IMAGE = "jeinnn4/foodexpress-api"
         IMAGE_TAG    = "${GIT_COMMIT.take(7)}"
         AWS_REGION   = 'us-east-1'
     }
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 60, unit: 'MINUTES')
         timestamps()
     }
 
@@ -25,18 +25,20 @@ pipeline {
         stage('Test') {
             steps {
                 sh '''
+                    node --version
+                    npm --version
                     npm ci
                     npm test
                 '''
             }
         }
-        
+
         stage('Build Docker Image') {
             steps {
-                script {
-                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
-                    docker.build("${DOCKER_IMAGE}:latest")
-                }
+                sh """
+                    docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} .
+                    docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest
+                """
             }
         }
 
@@ -50,8 +52,6 @@ pipeline {
                 )]) {
                     sh '''
                         echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
-                        docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} $DOCKERHUB_USER/foodexpress-api:${IMAGE_TAG}
-                        docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} $DOCKERHUB_USER/foodexpress-api:latest
                         docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
                         docker push ${DOCKER_IMAGE}:latest
                         docker logout
@@ -65,8 +65,8 @@ pipeline {
             steps {
                 dir('terraform') {
                     withCredentials([
-                        string(credentialsId: 'aws-access-key', variable: 'AWS_ACCESS_KEY_ID'),
-                        string(credentialsId: 'aws-secret-key', variable: 'AWS_SECRET_ACCESS_KEY'),
+                        string(credentialsId: 'aws-access-key',  variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-key',  variable: 'AWS_SECRET_ACCESS_KEY'),
                         string(credentialsId: 'ssh-public-key',  variable: 'SSH_PUBLIC_KEY')
                     ]) {
                         sh '''
@@ -74,6 +74,7 @@ pipeline {
                             terraform apply -auto-approve \
                               -var="ssh_public_key=${SSH_PUBLIC_KEY}"
                             terraform output -raw public_ip > /tmp/ec2_ip.txt
+                            echo "EC2 IP: $(cat /tmp/ec2_ip.txt)"
                         '''
                     }
                 }
@@ -91,13 +92,12 @@ pipeline {
                               docker pull ${DOCKER_IMAGE}:${IMAGE_TAG}
                               docker stop foodexpress-api 2>/dev/null || true
                               docker rm   foodexpress-api 2>/dev/null || true
-                              docker run -d \\
-                                --name foodexpress-api \\
-                                --restart unless-stopped \\
-                                -p 3000:3000 \\
-                                -e NODE_ENV=production \\
+                              docker run -d \
+                                --name foodexpress-api \
+                                --restart unless-stopped \
+                                -p 3000:3000 \
+                                -e NODE_ENV=production \
                                 ${DOCKER_IMAGE}:${IMAGE_TAG}
-                              docker system prune -f
                             '
                         """
                     }
@@ -106,12 +106,13 @@ pipeline {
         }
 
         stage('Health Check') {
+            when { branch 'main' }
             steps {
                 script {
                     def ec2Ip = readFile('/tmp/ec2_ip.txt').trim()
                     sh """
                         sleep 15
-                        curl --fail --retry 5 --retry-delay 10 \\
+                        curl --fail --retry 5 --retry-delay 10 \
                           http://${ec2Ip}:3000/health
                     """
                 }
