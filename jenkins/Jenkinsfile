@@ -23,17 +23,8 @@ pipeline {
         }
 
         stage('Test') {
-            agent {
-                docker {
-                    image 'node:18'
-                }
-            }
-            environment {
-                HOME = '/tmp'
-            }
             steps {
                 sh '''
-                    npm config set cache /tmp/.npm
                     npm ci
                     npm test
                 '''
