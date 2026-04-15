@@ -23,7 +23,6 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/orders',      require('./routes/orders'));
-app.use('/api/restaurants', require('./routes/restaurants'));
 
 app.listen(PORT, () => console.log(`FoodExpress running on port ${PORT}`));
 module.exports = app;
